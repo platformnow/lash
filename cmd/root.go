@@ -43,6 +43,7 @@ func LandscapeShell(ver, build string) *cobra.Command {
 	}
 
 	cmd.AddCommand(newCmdVersion(ver, build))
+	cmd.AddCommand(newCreateCmd())
 	cmd.AddCommand(newInitCmd())
 	cmd.AddCommand(newUninstallCmd())
 

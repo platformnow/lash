@@ -1,6 +1,6 @@
 module github.com/platfornow/lash
 
-go 1.18
+go 1.20
 
 require (
 	github.com/Machiel/slugify v1.0.1

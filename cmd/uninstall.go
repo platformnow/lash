@@ -5,6 +5,7 @@ import (
 	"flag"
 	"os"
 
+	"github.com/platfornow/lash/internal/argocd"
 	"github.com/platfornow/lash/internal/clusterrolebindings"
 	"github.com/platfornow/lash/internal/core"
 	"github.com/platfornow/lash/internal/crds"
@@ -18,14 +19,15 @@ import (
 	"github.com/platfornow/lash/internal/log"
 	"github.com/spf13/cobra"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/selection"
-	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
 )
+
+type RemoveFinalizersOpts struct {
+	RESTConfig *rest.Config
+}
 
 func newUninstallCmd() *cobra.Command {
 	o := uninstallOpts{
@@ -114,7 +116,9 @@ func (o *uninstallOpts) complete() (err error) {
 func (o *uninstallOpts) run() error {
 	ctx := context.TODO()
 
-	o.applicationsAndProjects(ctx)
+	o.deleteArgoApplications(ctx)
+
+	o.deleteArgoProjects(ctx)
 
 	if err := o.deletePackages(ctx); err != nil {
 		return err
@@ -125,6 +129,7 @@ func (o *uninstallOpts) run() error {
 	}
 
 	if err := o.deleteControllerConfigs(ctx); err != nil {
+		return err
 		return err
 	}
 
@@ -142,8 +147,88 @@ func (o *uninstallOpts) run() error {
 	return nil
 }
 
-func (o *uninstallOpts) applicationsAndProjects(ctx context.Context) {
-	// todo: delete argocd applications and projects will also need to remove the finalizer
+func (o *uninstallOpts) deleteArgoApplications(ctx context.Context) error {
+	all, err := argocd.ListApplications(ctx, o.restConfig)
+	if err != nil {
+		return err
+	}
+
+	if len(all) == 0 {
+		return nil
+	}
+
+	if o.dryRun {
+		o.bus.Publish(events.NewDebugEvent("found [%d] applications", len(all)))
+	}
+
+	for _, el := range all {
+		if o.dryRun {
+			o.bus.Publish(events.NewDebugEvent(" > %s", el.GetName()))
+			continue
+		}
+
+		o.bus.Publish(events.NewStartWaitEvent("removing application %s...", el.GetName()))
+
+		err = RemoveFinalizers(ctx, &el, o.restConfig)
+		if err != nil {
+			return err
+		}
+
+		err := core.Delete(ctx, core.DeleteOpts{
+			RESTConfig: o.restConfig,
+			Object:     &el,
+		})
+		if err != nil {
+			return err
+		}
+
+		o.bus.Publish(events.NewDoneEvent("application %s uninstalled", el.GetName()))
+	}
+
+	return nil
+
+}
+
+func (o *uninstallOpts) deleteArgoProjects(ctx context.Context) error {
+	all, err := argocd.ListProjects(ctx, o.restConfig)
+	if err != nil {
+		return err
+	}
+
+	if len(all) == 0 {
+		return nil
+	}
+
+	if o.dryRun {
+		o.bus.Publish(events.NewDebugEvent("found [%d] projects", len(all)))
+	}
+
+	for _, el := range all {
+		if o.dryRun {
+			o.bus.Publish(events.NewDebugEvent(" > %s", el.GetName()))
+			continue
+		}
+
+		o.bus.Publish(events.NewStartWaitEvent("removing project %s...", el.GetName()))
+
+		err = RemoveFinalizers(ctx, &el, o.restConfig)
+		if err != nil {
+			return err
+		}
+
+		err := core.Delete(ctx, core.DeleteOpts{
+			RESTConfig: o.restConfig,
+			Object:     &el,
+		})
+		if err != nil {
+			return err
+		}
+
+		o.bus.Publish(events.NewDoneEvent("project %s uninstalled", el.GetName()))
+	}
+
+	return nil
+
 }
 
 func (o *uninstallOpts) deleteCrossplane(ctx context.Context) error {
@@ -218,27 +303,6 @@ func (o *uninstallOpts) deleteProviders(ctx context.Context) error {
 			return err
 		}
 
-		// Start Watching
-		req, err := labels.NewRequirement(core.PackageNameLabel, selection.Equals, []string{el.GetName()})
-		if err != nil {
-			return err
-		}
-
-		sel := labels.NewSelector()
-		sel = sel.Add(*req)
-
-		err = core.Watch(ctx, core.WatchOpts{
-			RESTConfig: o.restConfig,
-			Selector:   sel,
-			GVR:        schema.GroupVersionResource{Version: "v1", Resource: "pods"},
-			Namespace:  el.GetNamespace(),
-			StopFn: func(et watch.EventType, obj *unstructured.Unstructured) (bool, error) {
-				return (et == watch.Deleted), nil
-			},
-		})
-		if err != nil {
-			return err
-		}
 		o.bus.Publish(events.NewDoneEvent("package %s uninstalled", el.GetName()))
 	}
 
@@ -296,7 +360,7 @@ func (o *uninstallOpts) deletePackages(ctx context.Context) error {
 			continue
 		}
 
-		o.bus.Publish(events.NewStartWaitEvent("uninstalling module %s...", el.GetName()))
+		o.bus.Publish(events.NewStartWaitEvent("uninstalling package %s...", el.GetName()))
 		err := core.Delete(ctx, core.DeleteOpts{
 			RESTConfig: o.restConfig,
 			Object:     &el,
@@ -418,9 +482,30 @@ func (o *uninstallOpts) deleteNamespace(ctx context.Context) {
 		return
 	}
 
+	err = RemoveFinalizers(ctx, obj, o.restConfig)
+	if err != nil {
+		return
+	}
+
 	core.Delete(ctx, core.DeleteOpts{
 		RESTConfig: o.restConfig,
 		Object:     obj,
 	})
 
+}
+
+func RemoveFinalizers(ctx context.Context, obj *unstructured.Unstructured, restConfig *rest.Config) error {
+
+	unstructured.SetNestedSlice(obj.Object, nil, "metadata", "finalizers")
+
+	err := core.Apply(ctx, core.ApplyOpts{
+		RESTConfig: restConfig,
+		Object:     obj,
+	})
+
+	if err != nil {
+		return err
+	}
+
+	return err
 }

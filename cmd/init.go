@@ -400,8 +400,7 @@ func (o *initOpts) applyClaims(ctx context.Context, vals []string) error {
 
 	o.bus.Publish(events.NewDoneEvent("Landscape IDP is ready"))
 
-	fmt.Printf("\nYou can now access your landscape idp instance at the following url:\n")
-	fmt.Printf("  >> https://app.%s\n\n", inp["domain"])
+	fmt.Printf("\nInstallation Complete:\n")
 
 	return nil
 }

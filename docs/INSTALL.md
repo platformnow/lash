@@ -13,7 +13,7 @@ Command line tool to manage PlatformNOW Landscape IDP.
 ### MacOs
 
 ```sh
-brew tap platformnow/lash
+brew tap platformnow/homebrew-lash
 brew install lash
 ```
 

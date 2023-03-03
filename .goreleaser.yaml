@@ -1,0 +1,62 @@
+# Run locally with: goreleaser --rm-dist --snapshot --skip-publish
+project_name: lash
+before:
+  hooks:
+    - go mod tidy
+    - go mod download
+builds:
+- env:
+    - CGO_ENABLED=0
+  ldflags:
+    - -s -w -X "main.Version={{.Version}}" -X "main.Build={{.ShortCommit}}"
+    - -a -extldflags "-static"
+  goos:
+    - windows
+    - linux
+    - darwin
+  goarch:
+    #- arm
+    - arm64
+    - amd64
+  goarm:
+    - 7
+archives:
+  - name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        format: zip
+nfpms:
+  -
+    package_name: lash
+    vendor: PlatformNOW
+    homepage: https://PlatformNOW.io/
+    description: Building a better developer experience
+    license: Apache License 2.0
+    maintainer: PlatformNOW Authors
+    formats:
+      - deb
+      - rpm
+
+brews:
+  - homepage: 'https://github.com/platformnow/homebrew-lash'
+    description: 'Commandline tool to manage PlatformNOW Landscape IDP.'
+    folder: Formula
+    commit_author:
+      name: platformnow
+      email: info@platformnow.io
+    tap:
+      owner: platformnow
+      name: homebrew-lash
+    install: |
+      bin.install "lash"
+
+announce:
+  twitter:
+    enabled: false
+    message_template: 'lash {{ .Tag }} is out! Check it out: https://github.com/platfornow/lash/releases/tag/{{ .Tag }}'
+
+  discord:
+    enabled: true
+    message_template: 'lash {{ .Tag }} is out! Check it out: https://github.com/platfornow/lash/releases/tag/{{ .Tag }}'
+    author: 'PlatformNOW Aauthors'
+    icon_url: 'https://raw.githubusercontent.com/platfornow/lash/master/docs/media/avatar.png'

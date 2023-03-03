@@ -1,4 +1,4 @@
-# Run locally with: goreleaser --rm-dist --snapshot --skip-publish
+# Run locally with: goreleaser --clean --snapshot --skip-publish
 project_name: lash
 before:
   hooks:
@@ -50,13 +50,3 @@ brews:
     install: |
       bin.install "lash"
 
-announce:
-  twitter:
-    enabled: false
-    message_template: 'lash {{ .Tag }} is out! Check it out: https://github.com/platfornow/lash/releases/tag/{{ .Tag }}'
-
-  discord:
-    enabled: true
-    message_template: 'lash {{ .Tag }} is out! Check it out: https://github.com/platfornow/lash/releases/tag/{{ .Tag }}'
-    author: 'PlatformNOW Authors'
-    icon_url: 'https://raw.githubusercontent.com/platfornow/lash/master/docs/media/avatar.png'

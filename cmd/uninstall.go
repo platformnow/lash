@@ -114,11 +114,13 @@ func (o *uninstallOpts) complete() (err error) {
 func (o *uninstallOpts) run() error {
 	ctx := context.TODO()
 
-	if err := o.deleteModules(ctx); err != nil {
+	o.applicationsAndProjects(ctx)
+
+	if err := o.deletePackages(ctx); err != nil {
 		return err
 	}
 
-	if err := o.deletePackages(ctx); err != nil {
+	if err := o.deleteProviders(ctx); err != nil {
 		return err
 	}
 
@@ -131,13 +133,17 @@ func (o *uninstallOpts) run() error {
 	}
 
 	o.bus.Publish(events.NewStartWaitEvent("finishing cleaning..."))
-	o.deletCompositions(ctx)
+	o.deleteCompositions(ctx)
 	o.deleteCRDsQuietly(ctx)
 	o.deleteClusterRoleBindingsQuietly(ctx)
 	o.deleteNamespace(ctx)
 	o.bus.Publish(events.NewStartWaitEvent("cleaning done"))
 
 	return nil
+}
+
+func (o *uninstallOpts) applicationsAndProjects(ctx context.Context) {
+	// todo: delete argocd applications and projects will also need to remove the finalizer
 }
 
 func (o *uninstallOpts) deleteCrossplane(ctx context.Context) error {
@@ -182,7 +188,7 @@ func (o *uninstallOpts) deleteCrossplane(ctx context.Context) error {
 	return nil
 }
 
-func (o *uninstallOpts) deletePackages(ctx context.Context) error {
+func (o *uninstallOpts) deleteProviders(ctx context.Context) error {
 	all, err := providers.List(ctx, o.restConfig)
 	if err != nil {
 		return err
@@ -271,7 +277,7 @@ func (o *uninstallOpts) deleteControllerConfigs(ctx context.Context) error {
 	return nil
 }
 
-func (o *uninstallOpts) deleteModules(ctx context.Context) error {
+func (o *uninstallOpts) deletePackages(ctx context.Context) error {
 	all, err := configurations.List(ctx, o.restConfig)
 	if err != nil {
 		return err
@@ -281,7 +287,7 @@ func (o *uninstallOpts) deleteModules(ctx context.Context) error {
 	}
 
 	if o.dryRun {
-		o.bus.Publish(events.NewDebugEvent("found [%d] modules", len(all)))
+		o.bus.Publish(events.NewDebugEvent("found [%d] packages", len(all)))
 	}
 
 	for _, el := range all {
@@ -298,13 +304,13 @@ func (o *uninstallOpts) deleteModules(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		o.bus.Publish(events.NewDoneEvent("module %s uninstalled", el.GetName()))
+		o.bus.Publish(events.NewDoneEvent("package %s uninstalled", el.GetName()))
 	}
 
 	return nil
 }
 
-func (o *uninstallOpts) deletCompositions(ctx context.Context) {
+func (o *uninstallOpts) deleteCompositions(ctx context.Context) {
 	all, err := compositions.List(ctx, o.restConfig)
 	if err != nil {
 		return

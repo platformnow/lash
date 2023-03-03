@@ -288,7 +288,7 @@ func (o *initOpts) promptForClaims(ctx context.Context) ([]string, error) {
 		}
 
 		// Use repo URL from flags
-		if el.Name == "repoURL" {
+		if el.Name == "catalogUrl" {
 			o.bus.Publish(events.NewDoneEvent("Setting catalogUrl to " + o.catalogUrl))
 			res = append(res, fmt.Sprintf("%s=%s", el.Name, o.catalogUrl))
 		} else {

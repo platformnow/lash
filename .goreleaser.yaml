@@ -50,3 +50,5 @@ brews:
     install: |
       bin.install "lash"
 
+checksum:
+  name_template: 'checksums.txt'

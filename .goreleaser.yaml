@@ -38,7 +38,7 @@ nfpms:
       - rpm
 
 brews:
-  - homepage: 'https://github.com/platformnow/homebrew-lash'
+  - homepage: 'https://github.com/platformnow/lash'
     description: 'Commandline tool to manage PlatformNOW Landscape IDP.'
     folder: Formula
     commit_author:
@@ -46,7 +46,7 @@ brews:
       email: info@platformnow.io
     tap:
       owner: platformnow
-      name: homebrew-lash
+      name: lash
     install: |
       bin.install "lash"
 

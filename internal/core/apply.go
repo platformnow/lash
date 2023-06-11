@@ -3,7 +3,6 @@ package core
 import (
 	"context"
 	"encoding/json"
-
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -26,7 +25,6 @@ func Apply(ctx context.Context, opts ApplyOpts) error {
 		return err
 	}
 
-	// 6. Marshal object into JSON
 	data, err := json.Marshal(opts.Object)
 	if err != nil {
 		return err

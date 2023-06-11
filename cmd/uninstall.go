@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"flag"
+	"k8s.io/apimachinery/pkg/types"
 	"os"
 
 	"github.com/platfornow/lash/internal/argocd"
@@ -116,9 +117,9 @@ func (o *uninstallOpts) complete() (err error) {
 func (o *uninstallOpts) run() error {
 	ctx := context.TODO()
 
-	o.deleteArgoApplications(ctx)
+	err := o.deleteArgoApplications(ctx)
 
-	o.deleteArgoProjects(ctx)
+	err = o.deleteArgoProjects(ctx)
 
 	if err := o.deletePackages(ctx); err != nil {
 		return err
@@ -130,21 +131,20 @@ func (o *uninstallOpts) run() error {
 
 	if err := o.deleteControllerConfigs(ctx); err != nil {
 		return err
-		return err
 	}
 
 	if err := o.deleteCrossplane(ctx); err != nil {
 		return err
 	}
 
-	o.bus.Publish(events.NewStartWaitEvent("finishing cleaning..."))
+	o.bus.Publish(events.NewStartWaitEvent("Finishing cleaning..."))
 	o.deleteCompositions(ctx)
 	o.deleteCRDsQuietly(ctx)
 	o.deleteClusterRoleBindingsQuietly(ctx)
 	o.deleteNamespace(ctx)
-	o.bus.Publish(events.NewStartWaitEvent("cleaning done"))
+	o.bus.Publish(events.NewDoneEvent("Cleaning done"))
 
-	return nil
+	return err
 }
 
 func (o *uninstallOpts) deleteArgoApplications(ctx context.Context) error {
@@ -421,7 +421,7 @@ func (o *uninstallOpts) deleteCRDsQuietly(ctx context.Context) {
 		}
 	} else {
 		for _, el := range items {
-			crds.PatchAndDelete(ctx, o.restConfig, &el)
+			err = crds.PatchAndDelete(ctx, o.restConfig, &el)
 		}
 	}
 
@@ -434,7 +434,7 @@ func (o *uninstallOpts) deleteCRDsQuietly(ctx context.Context) {
 	}
 
 	for _, el := range all {
-		crds.PatchAndDelete(ctx, o.restConfig, &el)
+		err = crds.PatchAndDelete(ctx, o.restConfig, &el)
 	}
 }
 
@@ -470,7 +470,7 @@ func (o *uninstallOpts) deleteClusterRoleBindingsQuietly(ctx context.Context) {
 	}
 }
 
-func (o *uninstallOpts) deleteNamespace(ctx context.Context) {
+func (o *uninstallOpts) deleteNamespace(ctx context.Context) error {
 	obj, err := core.Get(ctx, core.GetOpts{
 		RESTConfig: o.restConfig,
 		GVK: schema.GroupVersionKind{
@@ -479,28 +479,32 @@ func (o *uninstallOpts) deleteNamespace(ctx context.Context) {
 		Name: o.namespace,
 	})
 	if err != nil || obj == nil {
-		return
+		return err
 	}
 
 	err = RemoveFinalizers(ctx, obj, o.restConfig)
 	if err != nil {
-		return
+		return err
 	}
 
-	core.Delete(ctx, core.DeleteOpts{
+	err = core.Delete(ctx, core.DeleteOpts{
 		RESTConfig: o.restConfig,
 		Object:     obj,
 	})
 
+	return nil
 }
 
 func RemoveFinalizers(ctx context.Context, obj *unstructured.Unstructured, restConfig *rest.Config) error {
 
-	unstructured.SetNestedSlice(obj.Object, nil, "metadata", "finalizers")
-
-	err := core.Apply(ctx, core.ApplyOpts{
+	// Remove finalizers from metadata
+	err := core.Patch(ctx, core.PatchOpts{
 		RESTConfig: restConfig,
-		Object:     obj,
+		GVK:        obj.GroupVersionKind(),
+		PatchData:  []byte(`{"metadata":{"finalizers":[]}}`),
+		PatchType:  types.MergePatchType,
+		Name:       obj.GetName(),
+		Namespace:  obj.GetNamespace(),
 	})
 
 	if err != nil {

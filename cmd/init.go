@@ -383,8 +383,7 @@ func (o *initOpts) applyClaims(ctx context.Context, vals []string) error {
 	}
 
 	// Create a Core module instance
-	coreModule := claims.Core{}
-	coreModule.SetName("core")
+	coreModule := claims.NewCore("core")
 
 	err = claims.ApplyModule(ctx, claims.ModuleOpts{
 		RESTConfig: o.restConfig,

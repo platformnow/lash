@@ -23,16 +23,24 @@ type Core struct {
 	name string
 }
 
+func NewCore(name string) *Core {
+	return &Core{
+		name: name,
+	}
+}
+
 func (c Core) getName() string {
 	return c.name
 }
 
-func (c Core) SetName(s string) {
-	c.name = s
-}
-
 type GitOps struct {
 	name string
+}
+
+func NewGitops(name string) *GitOps {
+	return &GitOps{
+		name: name,
+	}
 }
 
 func (c GitOps) getName() string {

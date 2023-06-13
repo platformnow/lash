@@ -382,10 +382,14 @@ func (o *initOpts) applyClaims(ctx context.Context, vals []string) error {
 		}
 	}
 
-	err = claims.ApplyCoreModule(ctx, claims.ModuleOpts{
+	// Create a Core module instance
+	coreModule := claims.Core{}
+	coreModule.SetName("core")
+
+	err = claims.ApplyModule(ctx, claims.ModuleOpts{
 		RESTConfig: o.restConfig,
 		Data:       inp,
-	})
+	}, coreModule)
 	if err != nil {
 		return err
 	}
@@ -393,7 +397,7 @@ func (o *initOpts) applyClaims(ctx context.Context, vals []string) error {
 	o.bus.Publish(events.NewDoneEvent("core package claims installed"))
 
 	o.bus.Publish(events.NewStartWaitEvent("waiting for readiness ..."))
-	err = claims.WaitUntilModuleCoreIsReady(ctx, o.restConfig)
+	err = claims.WaitUntilModuleIsReady(ctx, o.restConfig, coreModule)
 	if err != nil {
 		return err
 	}

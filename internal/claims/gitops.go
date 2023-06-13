@@ -8,13 +8,13 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
-func (c Core) Apply(ctx context.Context, opts ModuleOpts) error {
-	gvk := c.GetGroupVersionKind()
+func (g GitOps) Apply(ctx context.Context, opts ModuleOpts) error {
+	gvk := g.GetGroupVersionKind()
 
 	obj := &unstructured.Unstructured{}
 	obj.SetKind(gvk.Kind)
 	obj.SetAPIVersion(gvk.GroupVersion().String())
-	obj.SetName("core")
+	obj.SetName("gitops")
 	obj.SetLabels(map[string]string{
 		core.InstalledByLabel: core.InstalledByValue,
 	})
@@ -30,17 +30,18 @@ func (c Core) Apply(ctx context.Context, opts ModuleOpts) error {
 	})
 }
 
-func (c Core) GetGroupVersionKind() schema.GroupVersionKind {
+func (g GitOps) GetGroupVersionKind() schema.GroupVersionKind {
 	return schema.GroupVersionKind{
 		Group:   "pkg.platformnow.io",
 		Version: "v1",
-		Kind:    "Core",
+		Kind:    "Gitops",
 	}
 }
-func (c Core) GetGroupVersionResource() schema.GroupVersionResource {
+
+func (g GitOps) GetGroupVersionResource() schema.GroupVersionResource {
 	return schema.GroupVersionResource{
 		Group:    "pkg.platformnow.io",
 		Version:  "v1",
-		Resource: "cores",
+		Resource: "gitops",
 	}
 }

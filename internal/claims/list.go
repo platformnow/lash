@@ -9,10 +9,10 @@ import (
 	"k8s.io/client-go/rest"
 )
 
-func List(ctx context.Context, restConfig *rest.Config) ([]unstructured.Unstructured, error) {
+func List(ctx context.Context, restConfig *rest.Config, resource ManagedResource) ([]unstructured.Unstructured, error) {
 	all, err := core.List(ctx, core.ListOpts{
 		RESTConfig: restConfig,
-		GVK:        getGroupVersionKind(),
+		GVK:        resource.GetGroupVersionKind(),
 	})
 	if err != nil {
 		if core.IsNoKindMatchError(err) || errors.IsNotFound(err) {

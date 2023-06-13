@@ -52,9 +52,9 @@ type ConditionedStatus struct {
 	Conditions []Condition `json:"conditions,omitempty"`
 }
 
-func WaitUntilReady(ctx context.Context, restConfig *rest.Config, name string) error {
+func WaitUntilReady(ctx context.Context, restConfig *rest.Config, resource ManagedResource) error {
 	stopFn := func(et watch.EventType, obj *unstructured.Unstructured) (bool, error) {
-		if obj.GetName() != name {
+		if obj.GetName() != resource.getName() {
 			return false, nil
 		}
 
@@ -84,12 +84,12 @@ func WaitUntilReady(ctx context.Context, restConfig *rest.Config, name string) e
 
 	return core.Watch(ctx, core.WatchOpts{
 		RESTConfig: restConfig,
-		GVR:        getGroupVersionResource(),
+		GVR:        resource.GetGroupVersionResource(),
 		StopFn:     stopFn,
 		Timeout:    time.Minute * 5,
 	})
 }
 
-func WaitUntilModuleCoreIsReady(ctx context.Context, restConfig *rest.Config) error {
-	return WaitUntilReady(ctx, restConfig, "core")
+func WaitUntilModuleIsReady(ctx context.Context, restConfig *rest.Config, resource ManagedResource) error {
+	return WaitUntilReady(ctx, restConfig, resource)
 }

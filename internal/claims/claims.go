@@ -12,8 +12,14 @@ type ModuleOpts struct {
 	Data       map[string]interface{}
 }
 
+type DeleteOpts struct {
+	RESTConfig *rest.Config
+	Name       string
+}
+
 type ManagedResource interface {
 	Apply(ctx context.Context, opts ModuleOpts) error
+	Delete(ctx context.Context, opts DeleteOpts) (err error)
 	GetGroupVersionKind() schema.GroupVersionKind
 	GetGroupVersionResource() schema.GroupVersionResource
 	getName() string
@@ -53,4 +59,8 @@ func (c GitOps) SetName(s string) {
 
 func ApplyModule(ctx context.Context, opts ModuleOpts, resource ManagedResource) error {
 	return resource.Apply(ctx, opts)
+}
+
+func DeleteModule(ctx context.Context, opts DeleteOpts, resource ManagedResource) error {
+	return resource.Delete(ctx, opts)
 }

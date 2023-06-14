@@ -2,6 +2,9 @@ package claims
 
 import (
 	"context"
+	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/dynamic"
 
 	"github.com/platfornow/lash/internal/core"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -28,6 +31,24 @@ func (g GitOps) Apply(ctx context.Context, opts ModuleOpts) error {
 		GVK:        gvk,
 		Object:     obj,
 	})
+}
+
+func (g GitOps) Delete(ctx context.Context, opts DeleteOpts) error {
+	gvr := g.GetGroupVersionResource()
+
+	dc, err := dynamic.NewForConfig(opts.RESTConfig)
+	if err != nil {
+		return err
+	}
+
+	err = dc.Resource(gvr).Delete(ctx, opts.Name, metav1.DeleteOptions{})
+	if err != nil {
+		if !errors.IsNotFound(err) {
+			return err
+		}
+	}
+
+	return err
 }
 
 func (g GitOps) GetGroupVersionKind() schema.GroupVersionKind {

@@ -17,5 +17,6 @@ For example running `make kind-up` will create a Kind cluster with the name `loc
 
 Follow the instructions in the [installation](./docs/INSTALL.md) guide to install LaSh.
 
+# Publishing
 
-
+Follow the instructions in the [publishing](./docs/PUBLISH.md) guide to install create a new release.

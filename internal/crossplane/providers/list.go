@@ -19,3 +19,36 @@ func List(ctx context.Context, restConfig *rest.Config) ([]unstructured.Unstruct
 		},
 	})
 }
+
+func ListHelmReleases(ctx context.Context, restConfig *rest.Config) ([]unstructured.Unstructured, error) {
+	return core.List(ctx, core.ListOpts{
+		RESTConfig: restConfig,
+		GVK: schema.GroupVersionKind{
+			Group:   "helm.crossplane.io",
+			Version: "v1beta1",
+			Kind:    "Release",
+		},
+	})
+}
+
+func ListHelmProviderConfigs(ctx context.Context, restConfig *rest.Config) ([]unstructured.Unstructured, error) {
+	return core.List(ctx, core.ListOpts{
+		RESTConfig: restConfig,
+		GVK: schema.GroupVersionKind{
+			Group:   "helm.crossplane.io",
+			Version: "v1alpha1",
+			Kind:    "ProviderConfig",
+		},
+	})
+}
+
+func ListK8ProviderConfigs(ctx context.Context, restConfig *rest.Config) ([]unstructured.Unstructured, error) {
+	return core.List(ctx, core.ListOpts{
+		RESTConfig: restConfig,
+		GVK: schema.GroupVersionKind{
+			Group:   "kubernetes.crossplane.io",
+			Version: "v1alpha1",
+			Kind:    "ProviderConfig",
+		},
+	})
+}

@@ -3,17 +3,20 @@ package cmd
 import (
 	"context"
 	"flag"
-	"k8s.io/apimachinery/pkg/types"
-	"os"
-
 	"github.com/platfornow/lash/internal/argocd"
+	"github.com/platfornow/lash/internal/claims"
 	"github.com/platfornow/lash/internal/clusterrolebindings"
+	"github.com/platfornow/lash/internal/clusterroles"
 	"github.com/platfornow/lash/internal/core"
 	"github.com/platfornow/lash/internal/crds"
 	"github.com/platfornow/lash/internal/crossplane"
+	"github.com/platfornow/lash/internal/crossplane/compositeresourcedefinitions"
 	"github.com/platfornow/lash/internal/crossplane/compositions"
 	"github.com/platfornow/lash/internal/crossplane/configurations"
 	"github.com/platfornow/lash/internal/crossplane/controllerconfigs"
+	"github.com/platfornow/lash/internal/crossplane/lock"
+	"github.com/platfornow/lash/internal/crossplane/managed"
+	"github.com/platfornow/lash/internal/crossplane/providerrevisions"
 	"github.com/platfornow/lash/internal/crossplane/providers"
 	"github.com/platfornow/lash/internal/eventbus"
 	"github.com/platfornow/lash/internal/events"
@@ -21,9 +24,11 @@ import (
 	"github.com/spf13/cobra"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
+	"os"
 )
 
 type RemoveFinalizersOpts struct {
@@ -129,7 +134,15 @@ func (o *uninstallOpts) run() error {
 		return err
 	}
 
+	if err := o.deleteReleases(ctx); err != nil {
+		return err
+	}
+
 	if err := o.deleteControllerConfigs(ctx); err != nil {
+		return err
+	}
+
+	if err := o.deleteXRDs(ctx); err != nil {
 		return err
 	}
 
@@ -141,8 +154,12 @@ func (o *uninstallOpts) run() error {
 	o.deleteCompositions(ctx)
 	o.deleteCRDsQuietly(ctx)
 	o.deleteClusterRoleBindingsQuietly(ctx)
-	o.deleteNamespace(ctx)
-	o.bus.Publish(events.NewDoneEvent("Cleaning done"))
+	o.deleteClusterRolesQuietly(ctx)
+	o.deleteManagedResources(ctx)
+	o.deleteCrossplaneLock(ctx)
+	o.deleteProviderRevisions(ctx)
+	err = o.deleteNamespace(ctx)
+	o.bus.Publish(events.NewStartWaitEvent("Cleaning done"))
 
 	return err
 }
@@ -231,6 +248,194 @@ func (o *uninstallOpts) deleteArgoProjects(ctx context.Context) error {
 
 }
 
+func (o *uninstallOpts) deleteXRDs(ctx context.Context) error {
+	all, err := compositeresourcedefinitions.List(ctx, o.restConfig)
+	if err != nil {
+		return err
+	}
+
+	if len(all) == 0 {
+		return nil
+	}
+
+	if o.dryRun {
+		o.bus.Publish(events.NewDebugEvent("found [%d] composite resource definitions", len(all)))
+	}
+
+	for _, el := range all {
+		if o.dryRun {
+			o.bus.Publish(events.NewDebugEvent(" > %s", el.GetName()))
+			continue
+		}
+
+		o.bus.Publish(events.NewStartWaitEvent("removing xrd %s...", el.GetName()))
+
+		err = RemoveFinalizers(ctx, &el, o.restConfig)
+		if err != nil {
+			return err
+		}
+
+		err := core.Delete(ctx, core.DeleteOpts{
+			RESTConfig: o.restConfig,
+			Object:     &el,
+		})
+		if err != nil {
+			return err
+		}
+
+		o.bus.Publish(events.NewDoneEvent("provider config %s uninstalled", el.GetName()))
+	}
+
+	return nil
+
+}
+
+func (o *uninstallOpts) deleteManagedResources(ctx context.Context) error {
+	// Remove all managed resources modules
+	coreModule := claims.NewCore("core")
+	gitopsModule := claims.NewGitops("core-argo-cd")
+
+	if err := o.deleteCompositeResources(ctx, coreModule); err != nil {
+		return err
+	}
+	if err := o.deleteCompositeResources(ctx, gitopsModule); err != nil {
+		return err
+	}
+
+	// Remove Releases
+	err := o.deleteReleases(ctx)
+	if err != nil {
+		return err
+	}
+
+	// Remove all managed resources (kubectl get managed)
+	// todo Only removing kubernetes objects for now, we may need to add other types of managed resources
+	all, err := managed.ListK8Objects(ctx, o.restConfig)
+	if err != nil {
+		return err
+	}
+
+	if len(all) == 0 {
+		return nil
+	}
+
+	if o.dryRun {
+		o.bus.Publish(events.NewDebugEvent("found [%d] composite resource definitions", len(all)))
+	}
+
+	for _, el := range all {
+		if o.dryRun {
+			o.bus.Publish(events.NewDebugEvent(" > %s", el.GetName()))
+			continue
+		}
+
+		o.bus.Publish(events.NewStartWaitEvent("removing xrd %s...", el.GetName()))
+
+		err = RemoveFinalizers(ctx, &el, o.restConfig)
+		if err != nil {
+			return err
+		}
+
+		err := core.Delete(ctx, core.DeleteOpts{
+			RESTConfig: o.restConfig,
+			Object:     &el,
+		})
+		if err != nil {
+			return err
+		}
+
+		o.bus.Publish(events.NewDoneEvent("provider config %s uninstalled", el.GetName()))
+	}
+
+	return nil
+
+}
+
+func (o *uninstallOpts) deleteCompositeResources(ctx context.Context, resource claims.ManagedResource) error {
+
+	all, err := claims.List(ctx, o.restConfig, resource)
+	if err != nil {
+		return err
+	}
+
+	if len(all) == 0 {
+		return nil
+	}
+
+	if o.dryRun {
+		o.bus.Publish(events.NewDebugEvent("found [%d] composite resource definitions", len(all)))
+	}
+
+	for _, el := range all {
+		if o.dryRun {
+			o.bus.Publish(events.NewDebugEvent(" > %s", el.GetName()))
+			continue
+		}
+
+		o.bus.Publish(events.NewStartWaitEvent("removing xrd %s...", el.GetName()))
+
+		err = RemoveFinalizers(ctx, &el, o.restConfig)
+		if err != nil {
+			return err
+		}
+
+		err := core.Delete(ctx, core.DeleteOpts{
+			RESTConfig: o.restConfig,
+			Object:     &el,
+		})
+		if err != nil {
+			return err
+		}
+
+		o.bus.Publish(events.NewDoneEvent("provider config %s uninstalled", el.GetName()))
+	}
+
+	return nil
+
+}
+
+func (o *uninstallOpts) deleteReleases(ctx context.Context) error {
+	all, err := providers.ListHelmReleases(ctx, o.restConfig)
+	if err != nil {
+		return err
+	}
+
+	if len(all) == 0 {
+		return nil
+	}
+
+	if o.dryRun {
+		o.bus.Publish(events.NewDebugEvent("found [%d] releases", len(all)))
+	}
+
+	for _, el := range all {
+		if o.dryRun {
+			o.bus.Publish(events.NewDebugEvent(" > %s", el.GetName()))
+			continue
+		}
+
+		o.bus.Publish(events.NewStartWaitEvent("removing release %s...", el.GetName()))
+
+		err = RemoveFinalizers(ctx, &el, o.restConfig)
+		if err != nil {
+			return err
+		}
+
+		err := core.Delete(ctx, core.DeleteOpts{
+			RESTConfig: o.restConfig,
+			Object:     &el,
+		})
+		if err != nil {
+			return err
+		}
+
+		o.bus.Publish(events.NewDoneEvent("release %s uninstalled", el.GetName()))
+	}
+
+	return nil
+
+}
+
 func (o *uninstallOpts) deleteCrossplane(ctx context.Context) error {
 	pod, err := crossplane.InstalledPOD(ctx, o.restConfig)
 	if err != nil {
@@ -273,6 +478,131 @@ func (o *uninstallOpts) deleteCrossplane(ctx context.Context) error {
 	return nil
 }
 
+func (o *uninstallOpts) deleteHelmProviderConfigs(ctx context.Context) error {
+	all, err := providers.ListHelmProviderConfigs(ctx, o.restConfig)
+	if err != nil {
+		return err
+	}
+
+	if len(all) == 0 {
+		return nil
+	}
+
+	if o.dryRun {
+		o.bus.Publish(events.NewDebugEvent("found [%d] provider configs for Helm", len(all)))
+	}
+
+	for _, el := range all {
+		if o.dryRun {
+			o.bus.Publish(events.NewDebugEvent(" > %s", el.GetName()))
+			continue
+		}
+
+		o.bus.Publish(events.NewStartWaitEvent("removing provider config %s...", el.GetName()))
+
+		err = RemoveFinalizers(ctx, &el, o.restConfig)
+		if err != nil {
+			return err
+		}
+
+		err := core.Delete(ctx, core.DeleteOpts{
+			RESTConfig: o.restConfig,
+			Object:     &el,
+		})
+		if err != nil {
+			return err
+		}
+
+		o.bus.Publish(events.NewDoneEvent("provider config %s uninstalled", el.GetName()))
+	}
+
+	return nil
+
+}
+
+func (o *uninstallOpts) deleteK8ProviderConfigs(ctx context.Context) error {
+	all, err := providers.ListK8ProviderConfigs(ctx, o.restConfig)
+	if err != nil {
+		return err
+	}
+
+	if len(all) == 0 {
+		return nil
+	}
+
+	if o.dryRun {
+		o.bus.Publish(events.NewDebugEvent("found [%d] provider configs for Helm", len(all)))
+	}
+
+	for _, el := range all {
+		if o.dryRun {
+			o.bus.Publish(events.NewDebugEvent(" > %s", el.GetName()))
+			continue
+		}
+
+		o.bus.Publish(events.NewStartWaitEvent("removing provider config %s...", el.GetName()))
+
+		err = RemoveFinalizers(ctx, &el, o.restConfig)
+		if err != nil {
+			return err
+		}
+
+		err := core.Delete(ctx, core.DeleteOpts{
+			RESTConfig: o.restConfig,
+			Object:     &el,
+		})
+		if err != nil {
+			return err
+		}
+
+		o.bus.Publish(events.NewDoneEvent("provider config %s uninstalled", el.GetName()))
+	}
+
+	return nil
+
+}
+
+func (o *uninstallOpts) deleteProviderRevisions(ctx context.Context) error {
+	all, err := providerrevisions.List(ctx, o.restConfig)
+	if err != nil {
+		return err
+	}
+
+	if len(all) == 0 {
+		return nil
+	}
+
+	if o.dryRun {
+		o.bus.Publish(events.NewDebugEvent("found [%d] provider revisions", len(all)))
+	}
+
+	for _, el := range all {
+		if o.dryRun {
+			o.bus.Publish(events.NewDebugEvent(" > %s", el.GetName()))
+			continue
+		}
+
+		o.bus.Publish(events.NewStartWaitEvent("removing provider revisions %s...", el.GetName()))
+
+		err = RemoveFinalizers(ctx, &el, o.restConfig)
+		if err != nil {
+			return err
+		}
+
+		err := core.Delete(ctx, core.DeleteOpts{
+			RESTConfig: o.restConfig,
+			Object:     &el,
+		})
+		if err != nil {
+			return err
+		}
+
+		o.bus.Publish(events.NewDoneEvent("provider revision %s uninstalled", el.GetName()))
+	}
+
+	return nil
+
+}
 func (o *uninstallOpts) deleteProviders(ctx context.Context) error {
 	all, err := providers.List(ctx, o.restConfig)
 	if err != nil {
@@ -400,6 +730,47 @@ func (o *uninstallOpts) deleteCompositions(ctx context.Context) {
 	}
 }
 
+func (o *uninstallOpts) deleteCrossplaneLock(ctx context.Context) error {
+	all, err := lock.List(ctx, o.restConfig)
+	if err != nil {
+		return err
+	}
+
+	if len(all) == 0 {
+		return nil
+	}
+
+	if o.dryRun {
+		o.bus.Publish(events.NewDebugEvent("found [%d] lock", len(all)))
+	}
+
+	for _, el := range all {
+		if o.dryRun {
+			o.bus.Publish(events.NewDebugEvent(" > %s", el.GetName()))
+			continue
+		}
+
+		o.bus.Publish(events.NewStartWaitEvent("removing lock %s...", el.GetName()))
+
+		err = RemoveFinalizers(ctx, &el, o.restConfig)
+		if err != nil {
+			return err
+		}
+
+		err := core.Delete(ctx, core.DeleteOpts{
+			RESTConfig: o.restConfig,
+			Object:     &el,
+		})
+		if err != nil {
+			return err
+		}
+
+		o.bus.Publish(events.NewDoneEvent("lock %s uninstalled", el.GetName()))
+	}
+
+	return nil
+
+}
 func (o *uninstallOpts) deleteCRDsQuietly(ctx context.Context) {
 	all, err := crds.List(ctx, o.restConfig)
 	if err != nil || len(all) == 0 {
@@ -421,6 +792,7 @@ func (o *uninstallOpts) deleteCRDsQuietly(ctx context.Context) {
 		}
 	} else {
 		for _, el := range items {
+			o.bus.Publish(events.NewDebugEvent(" > %s", el.GetName()))
 			err = crds.PatchAndDelete(ctx, o.restConfig, &el)
 		}
 	}
@@ -435,6 +807,7 @@ func (o *uninstallOpts) deleteCRDsQuietly(ctx context.Context) {
 
 	for _, el := range all {
 		err = crds.PatchAndDelete(ctx, o.restConfig, &el)
+		err = crds.PatchAndDeleteMergeType(ctx, o.restConfig, &el)
 	}
 }
 
@@ -447,6 +820,10 @@ func (o *uninstallOpts) deleteClusterRoleBindingsQuietly(ctx context.Context) {
 	res, err := core.Filter(all, func(obj unstructured.Unstructured) bool {
 		accept := (obj.GetName() == "provider-helm-admin-binding")
 		accept = accept || (obj.GetName() == "provider-kubernetes-admin-binding")
+		accept = accept || (obj.GetName() == "argocd-server-repo-server")
+		accept = accept || (obj.GetName() == "argocd-server-server")
+		accept = accept || (obj.GetName() == "argocd-server-application-controller")
+
 		return accept
 	})
 
@@ -464,6 +841,42 @@ func (o *uninstallOpts) deleteClusterRoleBindingsQuietly(ctx context.Context) {
 			continue
 		}
 		_ = clusterrolebindings.Delete(ctx, clusterrolebindings.DeleteOpts{
+			RESTConfig: o.restConfig,
+			Name:       el.GetName(),
+		})
+	}
+}
+func (o *uninstallOpts) deleteClusterRolesQuietly(ctx context.Context) {
+	all, err := clusterroles.List(ctx, o.restConfig)
+	if err != nil {
+		return
+	}
+
+	res, err := core.Filter(all, func(obj unstructured.Unstructured) bool {
+		accept := (obj.GetName() == "argocd-server-aggregate-to-admin")
+		accept = accept || (obj.GetName() == "argocd-server-aggregate-to-edit")
+		accept = accept || (obj.GetName() == "argocd-server-aggregate-to-view")
+		accept = accept || (obj.GetName() == "argocd-server-application-controller")
+		accept = accept || (obj.GetName() == "argocd-server-repo-server")
+		accept = accept || (obj.GetName() == "argocd-server-server")
+
+		return accept
+	})
+
+	if len(res) == 0 || err != nil {
+		return
+	}
+
+	if o.dryRun {
+		o.bus.Publish(events.NewDebugEvent("found [%d] cluster roles", len(res)))
+	}
+
+	for _, el := range res {
+		if o.dryRun {
+			o.bus.Publish(events.NewDebugEvent("> %s", el.GetName()))
+			continue
+		}
+		_ = clusterroles.Delete(ctx, clusterroles.DeleteOpts{
 			RESTConfig: o.restConfig,
 			Name:       el.GetName(),
 		})

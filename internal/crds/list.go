@@ -55,6 +55,9 @@ func List(ctx context.Context, restConfig *rest.Config) ([]unstructured.Unstruct
 	return core.Filter(all, func(el unstructured.Unstructured) bool {
 		ok := strings.HasSuffix(el.GroupVersionKind().Group, "platformnow.io")
 		ok = ok || strings.HasSuffix(el.GroupVersionKind().Group, "crossplane.io")
+		ok = ok || strings.HasSuffix(el.GetName(), "platformnow.io")
+		ok = ok || strings.HasSuffix(el.GetName(), "crossplane.io")
+		ok = ok || strings.HasSuffix(el.GetName(), "argoproj.io")
 		return ok
 	})
 }

@@ -27,3 +27,22 @@ func PatchAndDelete(ctx context.Context, restConfig *rest.Config, el *unstructur
 		Object:     el,
 	})
 }
+
+func PatchAndDeleteMergeType(ctx context.Context, restConfig *rest.Config, el *unstructured.Unstructured) error {
+	err := core.Patch(ctx, core.PatchOpts{
+		RESTConfig: restConfig,
+		GVK:        el.GroupVersionKind(),
+		PatchData:  []byte(`{"metadata":{"finalizers":[]}}`),
+		PatchType:  types.MergePatchType,
+		Name:       el.GetName(),
+		Namespace:  el.GetNamespace(),
+	})
+	if err != nil {
+		return err
+	}
+
+	return core.Delete(ctx, core.DeleteOpts{
+		RESTConfig: restConfig,
+		Object:     el,
+	})
+}
